@@ -4,8 +4,6 @@
 :global failoverMinPercentSuccessfulPings 75;
 :global failoverPingAttempts 4;
 
-:global loadbalanceAddressList "loadbalance-local-networks";
-
 :global getLinkNameFromComment do={
     :local searchStr "Link:";
     :local startIndex [:find $1 $searchStr];
