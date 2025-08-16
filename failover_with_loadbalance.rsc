@@ -3,7 +3,7 @@
 # return = 0 - nenhum link foi alterado; 1 - no mínimo 1 link foi alterado; 2 - links insuficientes para failover;
 :global runFailover do={
     :global defaultLinkPattern;
-    :global getRouteNameFromComment;
+    :global getLinkNameFromComment;
     :global failoverIpList;
     :global failoverMinPercentSuccessfulPings;
     :global failoverPingAttempts;
@@ -22,20 +22,20 @@
 
     # necessário para inicializar as tabelas de VRF
     ping 127.0.0.1 count=1;
-    :delay 2;
+    :delay 1;
 
     :foreach routeId in=$routesIds do={
         :local successfulPingCount 0;
-        :local routeName [$getRouteNameFromComment [/ip/route/get $routeId comment]];
+        :local routeName [$getLinkNameFromComment [/ip/route/get $routeId comment]];
         :local failoverRouteTable "vrf-failover-$routeName";
 
         :foreach ip in=$failoverIpList do={
-            :set successfulPingCount ($successfulPingCount + [ping address=$ip vrf=$failoverRouteTable interval=$pingInterval count=$failoverPingAttempts])
+            :set successfulPingCount ($successfulPingCount + [ping address=$ip vrf=$failoverRouteTable interval=$pingInterval count=$failoverPingAttempts]);
         }
 
-        :local successRatio ((($successfulPingCount / $pingTotalAttempts) * 100));
+        :local successRatio (($successfulPingCount * 100) / $pingTotalAttempts);
 
-        :if ($successRatio <= $failoverMinPercentSuccessfulPings) do={
+        :if ($successRatio < $failoverMinPercentSuccessfulPings) do={
             :set routesFailIds ($routesFailIds, $routeId);
             :log warning ("[Failover] A rota \"$routeName\" falhou com " . (100 - $successRatio) . "% de perda de pacotes");
         }
@@ -58,7 +58,7 @@
 
         :foreach routeId in=$routesIds do={
             :local routeFaield false;
-            :local routeName [$getRouteNameFromComment [/ip/route/get $routeId comment]];
+            :local routeName [$getLinkNameFromComment [/ip/route/get $routeId comment]];
             :local routeIsDisabled [/ip/route/get $routeId disabled];
             :local failoverRouteTable "vrf-failover-$routeName";
 
@@ -100,13 +100,8 @@
     :local gcd [];
     :local bandwidthTotal 0;
     :local routesEnabledCount [/ip/route/print count-only where dst-address=0.0.0.0/0 routing-table=main disabled=no comment~$defaultLinkPattern];
-    :local addressListExists ([/ip/firewall/address-list/print count-only where list=loadbalance-local-networks] >= 1);
     
-    /ip/firewall/mangle/remove [find comment~"[Loadbalance] PCC.*#script-generated"];
-
-    :if (!$addressListExists) do={
-        :error "[Loadbalance] A lista de endereços 'loadbalance-local-networks' não existe ou está vazia. Por favor, crie-a e/ou a preencha antes de executar este script";
-    };
+    /ip/firewall/mangle/remove [find comment~"\\[Loadbalance\\] PCC.*#script-generated"];
 
     :if ($routesEnabledCount = 0) do={
         :error "[Loadbalance] Não foram encontradas rotas suficientes ativas para o balanceamento de carga. Verifique as configurações";
@@ -131,7 +126,7 @@
             /ip/firewall/mangle/add \
                 chain=loadbalance \
                 per-connection-classifier="both-addresses:$mangleQtdTotal/$mangleIndex" \
-                action=mark-connection new-connection-mark="loadbalance-conn-out-$routeName" passthrough=yes \
+                action=mark-connection new-connection-mark="loadbalance-conn-out-$routeName" passthrough=no \
                 comment="[Loadbalance] PCC: $routeName ($mangleQtdTotal/$mangleIndex) #script-generated";
             
             :set mangleIndex ($mangleIndex + 1);
@@ -144,5 +139,5 @@
 
 :if ($result >= 1 || $loadbalanceWasExecuted = nil) do={
     :set loadbalanceWasExecuted true;
-    # $runLoadbalance;
+    $runLoadbalance;
 }
