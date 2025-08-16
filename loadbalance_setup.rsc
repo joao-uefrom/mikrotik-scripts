@@ -15,11 +15,11 @@
 
             :if ($totalMangleCount = 0 || $totalMangleCount = $defaultMangleCount) do={ 
                 /ip/firewall/mangle/add \
-                    chain=prerouting connection-mark=no-mark connection-state=new dst-address-list=!loadbalance-local-networks src-address-list=loadbalance-local-networks \
+                    chain=prerouting connection-mark=no-mark connection-state=new in-interface=bridge \
                     action=jump jump-target=loadbalance comment=$mangleComment;
             } else={
                 /ip/firewall/mangle/add \
-                    chain=prerouting connection-mark=no-mark connection-state=new dst-address-list=!loadbalance-local-networks src-address-list=loadbalance-local-networks \
+                    chain=prerouting connection-mark=no-mark connection-state=new in-interface=bridge \
                     action=jump jump-target=loadbalance comment=$mangleComment \
                     place-before=$defaultMangleCount;
             }
@@ -59,7 +59,7 @@
 
         :if (!$mangleExists) do={
             /ip/firewall/mangle/add \ 
-                chain=prerouting connection-mark="loadbalance-conn-out-$routeName" \
+                chain=prerouting connection-mark="loadbalance-conn-out-$routeName" in-interface=bridge \
                 action=mark-routing new-routing-mark=$loadbalanceRouteTable passthrough=no \
                 comment=$mangleComment;
             
