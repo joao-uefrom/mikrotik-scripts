@@ -17,6 +17,7 @@
     :local routesFailIds [];
 
     :if ([:len $routesIds] <= 1) do={
+        /ip/route/enable [find dst-address=0.0.0.0/0 routing-table=main comment~$defaultLinkPattern];
         :log error "[Failover] Não foram encontradas rotas suficientes para o failover automático. Verifique as configurações ou desabilite esse script.";
         :return 2;
     }
