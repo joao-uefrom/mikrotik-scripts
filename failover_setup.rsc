@@ -1,11 +1,11 @@
 /system script run global_definitions;
 
 :local setupEnviroment do={
-    :global getRouteNameFromComment;
+    :global getLinkNameFromComment;
     :global defaultLinkPattern;
 
     :foreach routeId in=[/ip/route/find dst-address=0.0.0.0/0 routing-table=main comment~$defaultLinkPattern] do={
-        :local routeName [$getRouteNameFromComment [/ip/route/get $routeId comment]];
+        :local routeName [$getLinkNameFromComment [/ip/route/get $routeId comment]];
         :local routeDistance 20;
         :local routeGateway [/ip/route/get $routeId gateway];
         :local routeComment [/ip/route/get $routeId comment];
