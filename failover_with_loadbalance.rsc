@@ -104,9 +104,14 @@
     :local gcd [];
     :local bandwidthTotal 0;
     :local routesEnabledCount [/ip/route/print count-only where dst-address=0.0.0.0/0 routing-table=main disabled=no comment~$defaultLinkPattern];
-    
+    :local addressListExists ([/ip/firewall/address-list/print count-only where list=loadbalance-local-networks] >= 1);
+
     /ip/firewall/mangle/remove [find comment~"\\[Loadbalance\\] PCC.*#script-generated"];
 
+    :if (!$addressListExists) do={
+        :error "[Loadbalance] A lista de endereços 'loadbalance-local-networks' não existe ou está vazia. Por favor, crie-a e/ou a preencha antes de executar este script";
+    };
+    
     :if ($routesEnabledCount = 0) do={
         :error "[Loadbalance] Não foram encontradas rotas suficientes ativas para o balanceamento de carga. Verifique as configurações";
     }
