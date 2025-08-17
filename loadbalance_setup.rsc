@@ -3,7 +3,6 @@
 :local setupEnviroment do={
     :global defaultLinkPattern;
     :global getLinkNameFromComment;
-    :global loadbalanceAddressList;
 
     :local setupMangle do={
         :local mangleComment "[Loadbalance] Envia pacotes de saída para a chain de Loadbalance #script-generated";
