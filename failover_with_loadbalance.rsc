@@ -135,7 +135,7 @@
             /ip/firewall/mangle/add \
                 chain=loadbalance \
                 per-connection-classifier="both-addresses:$mangleQtdTotal/$mangleIndex" \
-                action=mark-connection new-connection-mark="loadbalance-conn-out-$routeName" passthrough=no \
+                action=mark-connection new-connection-mark="loadbalance-conn-out-$routeName" passthrough=yes \
                 comment="[Loadbalance] PCC: $routeName ($mangleQtdTotal/$mangleIndex) #script-generated";
             
             :set mangleIndex ($mangleIndex + 1);

@@ -59,7 +59,7 @@
         :if (!$mangleExists) do={
             /ip/firewall/mangle/add \ 
                 chain=prerouting connection-mark="loadbalance-conn-out-$routeName" src-address-list=loadbalance-local-networks dst-address-list=!loadbalance-local-networks \
-                action=mark-routing new-routing-mark=$loadbalanceRouteTable passthrough=yes \
+                action=mark-routing new-routing-mark=$loadbalanceRouteTable passthrough=no \
                 comment=$mangleComment;
             
             :log info "[Loadbalance] Mangle criado para o gateway \"$routeGateway\" via \"$routeName\"";
