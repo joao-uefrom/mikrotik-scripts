@@ -8,6 +8,7 @@
     :global failoverMinPercentSuccessfulPings;
     :global failoverPingAttempts;
     :global failoverAllRoutesFailed; # 0 - algum link está ativo na execução atual; 1 - todos os links falharam na execução atual;
+    :global sendTelegramMessage;
 
     :local pingInterval .5;
     :local pingTotalAttempts ($failoverPingAttempts * [:len $failoverIpList]);
@@ -46,6 +47,7 @@
     :if ($allRoutesFailed) do={
         /ip/route/enable [find dst-address=0.0.0.0/0 comment~$defaultLinkPattern];
         :log error "[Failover] Todas as rotas falharam. Verifique a conectividade da rede";
+        $sendTelegramMessage "%E2%9D%97%E2%9D%97[Failover] Todas as rotas falharam.%0A%0AVerifique a conectividade da rede.";
 
         :if ($failoverAllRoutesFailed = 0) do={
             :set failoverAllRoutesFailed 1;
@@ -71,11 +73,13 @@
             :if ($routeFaield && !$routeIsDisabled) do={
                 /ip/route/disable [find routing-table!=$failoverRouteTable comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
                 :log warning "[Failover] Rota com falha desabilitada: $routeName";
+                $sendTelegramMessage ("%E2%9D%97[Failover] A rota \"" . $routeName ."\" foi desabilitada com falha.%0A%0AVerifique a conectividade da rede.");
                 :set wasAnyRouteChanged true;
             } else={
                 :if (!$routeFaield && $routeIsDisabled) do={
                     /ip/route/enable [find comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
                     :log info "[Failover] Rota reabilitada: $routeName";
+                    $sendTelegramMessage ("%E2%9C%85[Failover] A rota \"" . $routeName ."\" foi reabilitada.");
                     :set wasAnyRouteChanged true;
                 }
             }
@@ -95,7 +99,6 @@
     :global getLinkBandwidthFromComment;
     :global defaultLinkPattern;
     :global calculateGCD;
-    :global loadbalanceAddressList;
 
     :local gcd [];
     :local bandwidthTotal 0;
