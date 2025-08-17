@@ -14,11 +14,11 @@
 
             :if ($totalMangleCount = 0 || $totalMangleCount = $defaultMangleCount) do={ 
                 /ip/firewall/mangle/add \
-                    chain=prerouting connection-mark=no-mark connection-state=new in-interface=bridge \
+                    chain=prerouting connection-mark=no-mark connection-state=new src-address-list=loadbalance-local-networks dst-address-list=!loadbalance-local-networks \
                     action=jump jump-target=loadbalance comment=$mangleComment;
             } else={
                 /ip/firewall/mangle/add \
-                    chain=prerouting connection-mark=no-mark connection-state=new in-interface=bridge \
+                    chain=prerouting connection-mark=no-mark connection-state=new src-address-list=loadbalance-local-networks dst-address-list=!loadbalance-local-networks \
                     action=jump jump-target=loadbalance comment=$mangleComment \
                     place-before=$defaultMangleCount;
             }
@@ -58,8 +58,8 @@
 
         :if (!$mangleExists) do={
             /ip/firewall/mangle/add \ 
-                chain=prerouting connection-mark="loadbalance-conn-out-$routeName" in-interface=bridge \
-                action=mark-routing new-routing-mark=$loadbalanceRouteTable passthrough=no \
+                chain=prerouting connection-mark="loadbalance-conn-out-$routeName" src-address-list=loadbalance-local-networks dst-address-list=!loadbalance-local-networks \
+                action=mark-routing new-routing-mark=$loadbalanceRouteTable passthrough=yes \
                 comment=$mangleComment;
             
             :log info "[Loadbalance] Mangle criado para o gateway \"$routeGateway\" via \"$routeName\"";
