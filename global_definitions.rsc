@@ -1,8 +1,30 @@
+/system script run envs;
+
 :global defaultLinkPattern "Link:.*; {0,}?Bandwidth: {0,}?[0-9]{1,}";
 
-:global failoverIpList {1.1.1.1; 8.8.8.8; 200.160.0.8; 31.13.80.8};
-:global failoverMinPercentSuccessfulPings 75;
-:global failoverPingAttempts 4;
+:global calculateGCD do={
+    :if ([:typeof $1] != "array" || [:len $1] = 0) do={ 
+        :error "O array de valores está vazio ou não é um array";
+     }
+
+    :if ([:len $1] = 1) do={
+        :return ($1->0);
+    }
+
+    :local values $1;
+    :local gcd ($values->0);
+    
+    :for i from=1 to=([:len $values] - 1) do={
+        :local b [:pick $values $i]
+        :while ($b != 0) do={
+            :local temp $b
+            :set b ($gcd % $b)
+            :set gcd $temp
+        }
+    }
+
+    :return $gcd;
+};
 
 :global getLinkNameFromComment do={
     :local searchStr "Link:";
@@ -70,26 +92,15 @@
     :return $bandwidth;
 }
 
-:global calculateGCD do={
-    :if ([:typeof $1] != "array" || [:len $1] = 0) do={ 
-        :error "O array de valores está vazio ou não é um array";
-     }
+:global sendTelegramMessage do={
+    :global telegramBotToken;
+    :global telegramChatId;
+    :local message $1;
 
-    :if ([:len $1] = 1) do={
-        :return ($1->0);
+    :if ($telegramBotToken = "" || $telegramChatId = "") do={
+        :log warning "Telegram Bot Token or Chat ID is not set. Cannot send message.";
+        :return;
     }
 
-    :local values $1;
-    :local gcd ($values->0);
-    
-    :for i from=1 to=([:len $values] - 1) do={
-        :local b [:pick $values $i]
-        :while ($b != 0) do={
-            :local temp $b
-            :set b ($gcd % $b)
-            :set gcd $temp
-        }
-    }
-
-    :return $gcd;
-};
+    /tool/fetch url=("https://api.telegram.org/bot" . $telegramBotToken . "/sendMessage?chat_id=" . $telegramChatId . "&text=" . $message) keep-result=no;
+}
