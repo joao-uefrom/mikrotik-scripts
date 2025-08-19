@@ -1,101 +1,6 @@
-/system script run global_definitions;
+/system/script/run global_definitions;
 
-# return = 0 - nenhum link foi alterado; 1 - no mínimo 1 link foi alterado; 2 - links insuficientes para failover;
-:global runFailover do={
-    :global defaultLinkPattern;
-    :global getLinkNameFromComment;
-    :global failoverIpList;
-    :global failoverMinPercentSuccessfulPings;
-    :global failoverPingAttempts;
-    :global failoverAllRoutesFailed; # 0 - algum link está ativo na execução atual; 1 - todos os links falharam na execução atual;
-    :global sendTelegramMessage;
-
-    :local pingInterval .5;
-    :local pingTotalAttempts ($failoverPingAttempts * [:len $failoverIpList]);
-
-    :local routesIds [/ip/route/find dst-address=0.0.0.0/0 routing-table=main comment~$defaultLinkPattern];
-    :local routesFailIds [];
-
-    :if ([:len $routesIds] <= 1) do={
-        /ip/route/enable [find dst-address=0.0.0.0/0 routing-table=main comment~$defaultLinkPattern];
-        :log error "[Failover] Não foram encontradas rotas suficientes para o failover automático. Verifique as configurações ou desabilite esse script.";
-        :return 2;
-    }
-
-    # necessário para inicializar as tabelas de VRF
-    ping 127.0.0.1 count=1;
-    :delay 1;
-
-    :foreach routeId in=$routesIds do={
-        :local successfulPingCount 0;
-        :local routeName [$getLinkNameFromComment [/ip/route/get $routeId comment]];
-        :local failoverRouteTable "vrf-failover-$routeName";
-
-        :foreach ip in=$failoverIpList do={
-            :set successfulPingCount ($successfulPingCount + [ping address=$ip vrf=$failoverRouteTable interval=$pingInterval count=$failoverPingAttempts]);
-        }
-
-        :local successRatio (($successfulPingCount * 100) / $pingTotalAttempts);
-
-        :if ($successRatio < $failoverMinPercentSuccessfulPings) do={
-            :set routesFailIds ($routesFailIds, $routeId);
-            :log warning ("[Failover] A rota \"$routeName\" falhou com " . (100 - $successRatio) . "% de perda de pacotes");
-        }
-    }
-
-    :local allRoutesFailed ([:len $routesFailIds] = [:len $routesIds]);
-
-    :if ($allRoutesFailed) do={
-        /ip/route/enable [find dst-address=0.0.0.0/0 comment~$defaultLinkPattern];
-        :log error "[Failover] Todas as rotas falharam. Verifique a conectividade da rede";
-        $sendTelegramMessage "%E2%9D%97%E2%9D%97[Failover] Todas as rotas falharam.%0A%0AVerifique a conectividade da rede.";
-
-        :if ($failoverAllRoutesFailed = 0) do={
-            :set failoverAllRoutesFailed 1;
-            :return 1; # pelo menos uma rota foi alterada
-        }
-
-        :return 0; # nenhuma rota foi alterada
-    } else={
-        :local wasAnyRouteChanged false;
-
-        :foreach routeId in=$routesIds do={
-            :local routeFaield false;
-            :local routeName [$getLinkNameFromComment [/ip/route/get $routeId comment]];
-            :local routeIsDisabled [/ip/route/get $routeId disabled];
-            :local failoverRouteTable "vrf-failover-$routeName";
-
-            :foreach failRouteId in=$routesFailIds do={
-                :if ($routeId = $failRouteId) do={
-                    :set routeFaield true;
-                }
-            }
-
-            :if ($routeFaield && !$routeIsDisabled) do={
-                /ip/route/disable [find routing-table!=$failoverRouteTable comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
-                :log warning "[Failover] Rota com falha desabilitada: $routeName";
-                $sendTelegramMessage ("%E2%9D%97[Failover] A rota \"" . $routeName ."\" foi desabilitada com falha.%0A%0AVerifique a conectividade da rede.");
-                :set wasAnyRouteChanged true;
-            } else={
-                :if (!$routeFaield && $routeIsDisabled) do={
-                    /ip/route/enable [find comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
-                    :log info "[Failover] Rota reabilitada: $routeName";
-                    $sendTelegramMessage ("%E2%9C%85[Failover] A rota \"" . $routeName ."\" foi reabilitada.");
-                    :set wasAnyRouteChanged true;
-                }
-            }
-        }
-
-        :set failoverAllRoutesFailed 0;
-        :if ($wasAnyRouteChanged) do={
-            :return 1; # pelo menos uma rota foi alterada
-        } else={
-            :return 0; # nenhuma rota foi alterada
-        }
-    }
-}
-
-:global runLoadbalance do={
+:local runLoadbalance do={
     :global getLinkNameFromComment;
     :global getLinkBandwidthFromComment;
     :global defaultLinkPattern;
@@ -143,10 +48,116 @@
     }
 };
 
-:global loadbalanceWasExecuted;
-:local result [$runFailover];
+:local runFailover do={
+    :global defaultLinkPattern;
+    :global getLinkNameFromComment;
+    :global failoverPreviousState;
+    :global sendTelegramMessage;
+    :global runLoadbalance;
 
-:if ($result >= 1 || $loadbalanceWasExecuted = nil) do={
-    :set loadbalanceWasExecuted true;
-    $runLoadbalance;
+    :local enableAllRoutes do={ :global defaultLinkPattern; /ip/route/enable [find dst-address=0.0.0.0/0 comment~$defaultLinkPattern]; };
+    :local routesIds [/ip/route/find dst-address=0.0.0.0/0 routing-table=main comment~$defaultLinkPattern];
+
+    :if ([:len $routesIds] <= 1) do={
+        :if ($failoverPreviousState != "sem-rotas-suficientes") do={
+            $enableAllRoutes;
+            :set failoverPreviousState "sem-rotas-suficientes";
+
+            :log error "[Failover] Não foram encontradas rotas suficientes para o failover automático. Verifique as configurações ou desabilite esse script.";
+            $sendTelegramMessage "%E2%9D%97%E2%9D%97[Failover] Não foram encontradas rotas suficientes para o failover automático.%0A%0AVerifique as configurações ou desabilite esse script.";
+        
+            $runLoadbalance;
+        }
+
+        :return;
+    }
+
+    # necessário para inicializar as tabelas de VRF
+    ping 127.0.0.1 count=1;
+    :delay 1;
+
+    :local ipList {1.1.1.1; 8.8.8.8; 200.160.0.8; 31.13.80.8};
+
+    :local pingAttempts 12;
+    :local pingMaxResponseTime .350;
+    :local pingTotalAttempts ($pingAttempts * [:len $ipList]);
+    :local pingMinPercentSuccess 75;
+
+    :local routeMinPercentSuccess 75;
+    :local routesFailedCount 0;
+    :local routesThatStateChanged [];
+
+    :foreach routeId in=$routesIds do={
+        :local routeName [$getLinkNameFromComment [/ip/route/get $routeId comment]];
+        :local routeIsDisabled [/ip/route/get $routeId disabled];
+        :local failoverRouteTable "vrf-failover-$routeName";
+
+        :local successfulTestCount 0;
+
+        :foreach ip in=$ipList do={
+            :local successfulPingCount [ping address=$ip vrf=$failoverRouteTable interval=$pingMaxResponseTime count=$pingAttempts];
+            :local successPingRatio (($successfulPingCount * 100) / $pingAttempts);
+            
+            :if (successPingRatio >= $pingMinPercentSuccess) do={
+                :set successfulTestCount ($successfulTestCount + 1);
+            }
+        }
+
+        :local successRatio (($successfulTestCount * 100) / [:len $ipList]);
+
+        :if ($successRatio >= $routeMinPercentSuccess && $routeIsDisabled) do={
+            :set routesThatStateChanged ($routesThatStateChanged, {"$routeId"={"successRatio"=$successRatio;"newState"=true;name=$routeName}});
+        } 
+        
+        :if ($successRatio < $routeMinPercentSuccess && !$routeIsDisabled){
+            :set routesThatStateChanged ($routesThatStateChanged, {"$routeId"={"successRatio"=$successRatio;"newState"=false;name=$routeName}});
+            :set routesFailedCount ($routesFailedCount + 1);
+        }
+    }
+
+    :local allRoutesFailed ($routesFailedCount = [:len $routesIds]);
+
+    :if ($allRoutesFailed) do={
+        :if ($failoverPreviousState != "todas-as-rotas-falharam") do={
+            $enableAllRoutes;
+            :set failoverPreviousState "todas-as-rotas-falharam";
+
+            :log error "[Failover] Todas as rotas falharam. Verifique a conectividade da rede";
+            $sendTelegramMessage "%E2%9D%97%E2%9D%97[Failover] Todas as rotas falharam.%0A%0AVerifique a conectividade da rede.";
+
+            $runLoadbalance;
+        }
+        
+        :return;
+    } 
+    
+    if ([:len $routesThatStateChanged] > 0) do={
+        :set failoverPreviousState "pelo-menos-uma-rota-foi-alterada";
+
+        :foreach routeId,v in=$routesThatStateChanged do={
+            :local routeName $v->"name";
+            :local routeIsToEnable $v->"newState";
+            :local routeSuccessRatio $v->"successRatio";
+            :local failoverRouteTable "vrf-failover-$routeName";
+
+            :if ($routeIsToEnable) do={
+                /ip/route/enable [find comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
+                
+                :log info "[Failover] Rota reabilitada: $routeName";
+                $sendTelegramMessage ("%E2%9C%85[Failover] A rota \"" . $routeName ."\" foi reabilitada.");
+            } else={
+                /ip/route/disable [find routing-table!=$failoverRouteTable comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
+
+                :log warning ("[Failover] A rota \"$routeName\" foi desabilitada com " . $routeSuccessRatio . "% de perda de pacotes");
+                $sendTelegramMessage ("%E2%9D%97[Failover] A rota \"$routeName\" foi desabilitada com " . $routeSuccessRatio . "% de perda de pacotes.%0A%0AVerifique a conectividade da rede.");
+            }
+        }
+
+        $runLoadbalance;
+        :return;
+    }
+
+    :set failoverPreviousState "sem-alteracoes";
 }
+
+$runFailover;
