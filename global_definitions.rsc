@@ -1,4 +1,4 @@
-/system script run envs;
+/system/script/run envs;
 
 :global defaultLinkPattern "Link:.*; {0,}?Bandwidth: {0,}?[0-9]{1,}";
 
@@ -98,9 +98,13 @@
     :local message $1;
 
     :if ($telegramBotToken = "" || $telegramChatId = "") do={
-        :log warning "Telegram Bot Token or Chat ID is not set. Cannot send message.";
-        :return;
+        :log warning "[Telegram] Token ou Chat ID não estão definidos. Não é possível enviar a mensagem";
+        :return 1;
     }
 
-    /tool/fetch url=("https://api.telegram.org/bot" . $telegramBotToken . "/sendMessage?chat_id=" . $telegramChatId . "&text=" . $message) keep-result=no;
+    :onerror e { 
+        /tool/fetch url=("https://api.telegram.org/bot" . $telegramBotToken . "/sendMessage?chat_id=" . $telegramChatId . "&text=" . $message) keep-result=no;
+    } do={
+        :log error ("[Telegram] Falha ao tentar enviar mensagem para o Telegram: " . $e);
+    }
 }
