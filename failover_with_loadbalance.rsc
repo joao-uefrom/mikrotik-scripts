@@ -54,6 +54,7 @@
     :global failoverPreviousState;
     :global sendTelegramMessage;
     :global failoverLinkFailsCount;
+    :global failoverLinkSuccessCount;
     
     :local runLoadbalance $1;
     :local enableAllRoutes do={ :global defaultLinkPattern; /ip/route/enable [find dst-address=0.0.0.0/0 comment~$defaultLinkPattern]; };
@@ -134,27 +135,34 @@
     if ([:len $routesThatStateChanged] > 0) do={
         :set failoverPreviousState "pelo-menos-uma-rota-foi-alterada";
 
-        # necessário para rastrear erros consecutivos entre execuções
+        # necessário para rastrear comportamentos consecutivos entre execuções
         :local linkFailsCount;
+        :local linkSuccessCount;
+        :local minConsecutiveFail 3;
+        :local minConsecutiveSuccess 2;
 
         :foreach v in=$routesThatStateChanged do={
             :local routeName ($v->"name");
             :local routeIsToEnable ($v->"newState");
-            :local routeFailRatio (100 - $v->"successRatio");
-
-            # recupera da execução anterior a quantidade de falhas que teve
-            :set ($linkFailsCount->$routeName) ($failoverLinkFailsCount->$routeName);
+            :local routeFailRatio (100 - $v->"successRatio");            
 
             :if ($routeIsToEnable) do={
-                /ip/route/enable [find comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
-                
-                :log info "[Failover] Rota reabilitada: $routeName";
-                $sendTelegramMessage ("%E2%9C%85[Failover] A rota \"" . $routeName ."\" foi reabilitada.");
+                :set ($linkSuccessCount->$routeName) ($failoverLinkSuccessCount->$routeName + 1);
+
+                :if (($linkSuccessCount->$routeName) >= $minConsecutiveSuccess) do={
+                    /ip/route/enable [find comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
+
+                    :local message "[Failover] A rota \"$routeName\" foi reabilitada após $minConsecutiveSuccess testes consecutivos bem-sucedidos";
+                    :log info message;
+                    $sendTelegramMessage ("%E2%9C%85" . $message . ".");
+                }
             } else={
-                :if (($linkFailsCount->$routeName) >= 3) do={
+                :set ($linkFailsCount->$routeName) ($failoverLinkFailsCount->$routeName + 1);
+
+                :if (($linkFailsCount->$routeName) >= $minConsecutiveFail) do={
                     /ip/route/disable [find (routing-table~"failover")=false comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
 
-                    :local message "[Failover] A rota \"$routeName\" foi desabilitada após 3 falhas consecutivas no teste de conectividade, registrando $routeFailRatio% de perda de pacotes no último teste";
+                    :local message "[Failover] A rota \"$routeName\" foi desabilitada após $minConsecutiveFail falhas consecutivas no teste de conectividade, registrando $routeFailRatio% de perda de pacotes no último teste";
                     :log warning $message;
                     $sendTelegramMessage ("%E2%9D%97" . $message . ".%0A%0AVerifique a conectividade da rede.");
                 }
@@ -163,17 +171,18 @@
             }
         }
 
-        # transfere para o global apenas links que tiveram falha entre a execução anterior e a atual.
-        # dessa forma, conseguimos rastrear falhas consecutivas, onde se no teste atual uma rota anterior falhou, ela será contada.
-        # se uma rota anterior falhou, mas não falhou no teste atual, ela será zera pelo simples fato de não ter sido reinserida no array para a execução seguinte.
+        # transfere para o global apenas links que tiveram o mesmo comportamento entre a execução anterior e a atual.
+        # dessa forma, conseguimos rastrear sucessos/falhas consecutivos(as), onde se no teste atual uma rota anterior tiver o mesmo comportamento, ela será contada.
         :set failoverLinkFailsCount $linkFailsCount;
+        :set failoverLinkSuccessCount $linkSuccessCount;
 
         $runLoadbalance;
         :return 0;
     }
 
-    # limpa caso não tenha registrado nenhuma falha
+    # limpa caso não tenha registrado nenhuma alteração
     :set failoverLinkFailsCount;
+    :set failoverLinkSuccessCount;
     :set failoverPreviousState "sem-alteracoes";
 }
 
