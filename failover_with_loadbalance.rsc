@@ -158,4 +158,12 @@
     :set failoverPreviousState "sem-alteracoes";
 }
 
-$runFailover $runLoadbalance;
+:global failoverIsRunning;
+
+:if ($failoverIsRunning = true) do={
+    :log warning "[Failover] O script de failover já está em execução. Abortando nova execução.";
+} else={
+    :set failoverIsRunning true;
+    $runFailover $runLoadbalance;
+    :set failoverIsRunning false;
+}
