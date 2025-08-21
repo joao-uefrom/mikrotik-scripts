@@ -91,13 +91,16 @@
         :local failoverRouteTable "vrf-failover-$routeName";
 
         :local successfulTestCount 0;
+        :local successfulPingCount 0;
 
         # necessário para inicializar as tabelas de VRF
         ping 127.0.0.1 count=1;
 
         :foreach ip in=$ipList do={
-            :local successfulPingCount [ping address=$ip vrf=$failoverRouteTable interval=$pingMaxResponseTime count=$pingAttempts];
-            :local successPingRatio (($successfulPingCount * 100) / $pingAttempts);
+            :local successfulPingCountLocal [ping address=$ip vrf=$failoverRouteTable interval=$pingMaxResponseTime count=$pingAttempts];
+            :local successPingRatio (($successfulPingCountLocal * 100) / $pingAttempts);
+
+            :set successfulPingCount ($successfulPingCount + $successfulPingCountLocal);
 
             :if ($successPingRatio >= $pingMinPercentSuccess) do={
                 :set successfulTestCount ($successfulTestCount + 1);
@@ -105,13 +108,14 @@
         }
 
         :local successRatio (($successfulTestCount * 100) / [:len $ipList]);
+        :local successPingRatio (($successfulPingCount * 100) / $pingTotalAttempts);
 
         :if ($successRatio >= $routeMinPercentSuccess && $routeIsDisabled) do={
-            :set routesThatStateChanged ($routesThatStateChanged, {{"successRatio"=$successRatio;"newState"=true;name=$routeName}});
+            :set routesThatStateChanged ($routesThatStateChanged, {{"successRatio"=$successRatio;"newState"=true;name=$routeName;"pingSuccessRatio"=$successPingRatio}});
         } 
         
         :if ($successRatio < $routeMinPercentSuccess && !$routeIsDisabled) do={
-            :set routesThatStateChanged ($routesThatStateChanged, {{"successRatio"=$successRatio;"newState"=false;name=$routeName}});
+            :set routesThatStateChanged ($routesThatStateChanged, {{"successRatio"=$successRatio;"newState"=false;name=$routeName;"pingSuccessRatio"=$successPingRatio}});
             :set routesFailedCount ($routesFailedCount + 1);
         }
     }
@@ -144,30 +148,33 @@
         :foreach v in=$routesThatStateChanged do={
             :local routeName ($v->"name");
             :local routeIsToEnable ($v->"newState");
-            :local routeFailRatio (100 - $v->"successRatio");            
+            :local routeSuccessRatio ($v->"successRatio");
+            :local routePingSuccessRatio ($v->"pingSuccessRatio");
 
             :if ($routeIsToEnable) do={
                 :set ($linkSuccessCount->$routeName) ($failoverLinkSuccessCount->$routeName + 1);
 
+                :log warning ("[Failover] A rota \"$routeName\" está com " . ($linkSuccessCount->$routeName) . " tentativa(s) consecutiva(s) de sucesso registrada. O último teste teve $routeSuccessRatio% de sucesso e $routePingSuccessRatio% de entrega de pacotes");
+
                 :if (($linkSuccessCount->$routeName) >= $minConsecutiveSuccess) do={
                     /ip/route/enable [find comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
 
-                    :local message "[Failover] A rota \"$routeName\" foi reabilitada após $minConsecutiveSuccess testes consecutivos bem-sucedidos";
-                    :log info message;
+                    :local message ("[Failover] A rota \"$routeName\" foi reabilitada após $minConsecutiveSuccess tentativas consecutivas de sucesso registrada. O último teste teve $routeSuccessRatio% de sucesso e $routePingSuccessRatio% de entrega de pacotes");
+                    :log warning $message;
                     $sendTelegramMessage ("%E2%9C%85" . $message . ".");
                 }
             } else={
                 :set ($linkFailsCount->$routeName) ($failoverLinkFailsCount->$routeName + 1);
 
+                :log error ("[Failover] A rota \"$routeName\" está com " . ($linkFailsCount->$routeName) . " tentativa(s) consecutiva(s) de falha registrada. O último teste teve $routeSuccessRatio% de sucesso e " . (100 - $routePingSuccessRatio) . "% de perda de pacotes");
+
                 :if (($linkFailsCount->$routeName) >= $minConsecutiveFail) do={
                     /ip/route/disable [find (routing-table~"failover")=false comment~"^Link:.*$routeName" dst-address=0.0.0.0/0];
 
-                    :local message "[Failover] A rota \"$routeName\" foi desabilitada após $minConsecutiveFail falhas consecutivas no teste de conectividade, registrando $routeFailRatio% de perda de pacotes no último teste";
-                    :log warning $message;
+                    :local message ("[Failover] A rota \"$routeName\" foi desabilitada após $minConsecutiveFail tentativas consecutivas de falha registrada. O último teste teve $routeSuccessRatio% de sucesso e " . (100 - $routePingSuccessRatio) . "% de perda de pacotes");
+                    :log error $message;
                     $sendTelegramMessage ("%E2%9D%97" . $message . ".%0A%0AVerifique a conectividade da rede.");
                 }
-
-                :set ($linkFailsCount->$routeName) ($linkFailsCount->$routeName + 1);
             }
         }
 
@@ -189,7 +196,7 @@
 :global failoverIsRunning;
 
 :if ($failoverIsRunning = true) do={
-    :log warning "[Failover] O script de failover já está em execução. Abortando nova execução.";
+    :log info "[Failover] O script de failover já está em execução. Abortando nova execução.";
 } else={
     :set failoverIsRunning true;
     $runFailover $runLoadbalance;
